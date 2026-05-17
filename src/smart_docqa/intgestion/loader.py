@@ -44,3 +44,9 @@ def load_documents(source:Union[str,Path])->list[Document]:
         doc.metadata["file_type"]=suffix
 
     return docs    
+
+# load=load_documents("demo_file/demo.docx")
+# print("________________data_______________")
+# print(f"documents:{load[0].page_content}")
+# print(f"Metadata:{load[0].metadata
+#                    }")
