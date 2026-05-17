@@ -1,0 +1,15 @@
+Retrieval-Augmented Generation (RAG) bridges the gap between static LLMs and dynamic, real-world data.
+
+During the ingestion phase, raw documents are parsed, cleaned, and split into manageable chunks for processing.
+
+Text splitters ensure that chunks maintain semantic meaning without exceeding the token limits of the embedding model.
+
+These text chunks are then converted into high-dimensional numerical vectors, known as embeddings.
+
+Vector databases, such as Qdrant, Pinecone, or ChromaDB, store these embeddings to enable lightning-fast similarity searches.
+
+When a user asks a query, the system first embeds the question to find the most mathematically similar document chunks in the database.
+
+The retrieved context is then injected into a carefully crafted prompt alongside the original user query.
+
+Finally, the language model reads the combined prompt and generates a highly accurate response grounded specifically in the provided facts.
