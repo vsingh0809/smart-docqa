@@ -20,9 +20,11 @@ def build_qa_chain(retriever:BaseRetriever):
         temperature=0
     )
 
+    compressor=doc_compressor(base_retriever=BaseRetriever,llm=llm)
+
     chain=(
         {
-            "context":doc_compressor(base_retriever=BaseRetriever,llm=llm)|RunnableLambda(format_docs),
+            "context":compressor|RunnableLambda(format_docs),
             "questions":RunnablePassthrough()
         }
         |QA_PROMPT
@@ -30,7 +32,6 @@ def build_qa_chain(retriever:BaseRetriever):
         |StrOutputParser()
     )
 
-    return chain,doc_compressor(base_retriever=BaseRetriever,llm=llm)
-
+    return chain,compressor
 
 

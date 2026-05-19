@@ -1,1 +1,23 @@
+# environment
 .env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# data and indexes — these are big and regeneratable
+chroma_db/
+*.pkl
+*.faiss
+
+# eval outputs — optionally commit these, but not by default
+eval_results.json
+
+# editor
+.vscode/
+.idea/
+*.DS_Store
+
+# build
+dist/
+*.egg-info/
