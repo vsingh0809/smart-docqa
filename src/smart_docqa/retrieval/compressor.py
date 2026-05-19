@@ -1,15 +1,14 @@
 import logging
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.retrievers import BaseRetriever
-from langchain_classic.retrievers import ContextualCompressionRetriever
-from langchain_classic.retrievers.document_compressors import LLMChainExtractor
-from langchain_openai import ChatOpenAI
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import LLMChainExtractor
 from smart_docqa.config import settings
 
 
 logger=logging.getLogger(__name__)
 
-def doc_compressor(base_retriever:BaseRetriever,llm:ChatOpenAI)->ContextualCompressionRetriever:
+def doc_compressor(base_retriever:BaseRetriever,llm:ChatGoogleGenerativeAI)->ContextualCompressionRetriever:
     
     compressor=LLMChainExtractor.from_llm(llm)
 

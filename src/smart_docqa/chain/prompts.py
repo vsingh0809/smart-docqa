@@ -5,7 +5,7 @@ Answer ONLY from the context provided. If the answer is not in the context, say:
 "I could not find this information in the uploaded document."
 
 Always cite the source at the end of your answer using the format:
-[Source: {source}]
+[Source: {{source}}]
 
 Context:
 {context}"""
