@@ -2,7 +2,7 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from smart_docqa.config import settings
 
-def load_chunk(docs:list[Document])->list[Document]:
+def load_chunks(docs:list[Document])->list[Document]:
 
     if not docs:
         raise FileExistsError("there is no such docs")
@@ -18,7 +18,7 @@ def load_chunk(docs:list[Document])->list[Document]:
 
     for i,chunk in enumerate(chunks):
         chunk.metadata["chunk_index"]=i
-        chunk.metadata["chunk_count"]=len(chunk)
+        chunk.metadata["chunk_count"]=len(chunks)
 
     return chunks
 
