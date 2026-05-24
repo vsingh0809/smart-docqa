@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 def get_embedding() -> GoogleGenerativeAIEmbeddings:
     return GoogleGenerativeAIEmbeddings(
         model=settings.embedding_model,
-        google_api_key=settings.google_api_key,  # wrap in SecretStr
+        google_api_key=settings.google_api_key,  
     )
 
 def doc_embedd(chunks: list[Document]) -> Chroma:
@@ -37,7 +37,7 @@ def doc_embedd(chunks: list[Document]) -> Chroma:
 
 def load_chroma() -> Chroma:
     return Chroma(
-        embedding_function=get_embedding(),   # call the function, not pass it
+        embedding_function=get_embedding(),   
         persist_directory=settings.chroma_persist_dir,
         collection_name=settings.collection_name,
     )

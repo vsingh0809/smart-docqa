@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     chunk_size:int=512
     chunk_overlap:int=64
     retriever_k:int=6
-    embedding_model: str = "models/embedding-001"
+    embedding_model: str = "models/gemini-embedding-2-preview"
     llm_model: str = "gemini-3.1-flash-lite"
 
 settings = Settings()
