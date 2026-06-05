@@ -41,7 +41,7 @@ Most RAG demos stop at "upload a PDF and ask questions." This project goes furth
 
 ## Live Demo
 
-> **[Live App on Streamlit Cloud](https://your-app.streamlit.app)** — replace with your deployed URL
+> **[Live App on Streamlit Cloud](https://your-app.streamlit.app)** — Working.....
 
 ![Demo GIF](assets/demo.gif)
 
