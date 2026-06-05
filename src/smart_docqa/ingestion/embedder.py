@@ -1,43 +1,25 @@
+import os
 import logging
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_chroma import Chroma
 from langchain_core.documents import Document
-from pydantic import SecretStr
+from langchain_qdrant import QdrantVectorStore
 from smart_docqa.config import settings
+from smart_docqa.model_manager.model_manager import get_dense_embedding_model, get_sparse_embedding_model
 
 logger = logging.getLogger(__name__)
 
-
-def get_embedding() -> GoogleGenerativeAIEmbeddings:
-    return GoogleGenerativeAIEmbeddings(
-        model=settings.embedding_model,
-        google_api_key=settings.google_api_key,  
-    )
-
-def doc_embedd(chunks: list[Document]) -> Chroma:
+def doc_embedd(chunks: list[Document]) -> QdrantVectorStore:
     if not chunks:
         raise ValueError("Cannot build vectorstore from empty chunk list.")
 
-    logger.info(
-        "Embedding %d chunks into collection '%s'",
-        len(chunks),
-        settings.collection_name,
-    )
+    logger.info("Embedding %d chunks to Qdrant Cloud...", len(chunks))
 
-    vector_store = Chroma.from_documents(
+    vector_store = QdrantVectorStore.from_documents(
         documents=chunks,
-        embedding=get_embedding(),
+        embedding=get_dense_embedding_model(),
+        sparse_embedding=get_sparse_embedding_model(),
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key,
         collection_name=settings.collection_name,
-        persist_directory=settings.chroma_persist_dir,
+        force_recreate=True 
     )
-
-    logger.info("Vectorstore built and persisted to %s", settings.chroma_persist_dir)
     return vector_store
-
-
-def load_chroma() -> Chroma:
-    return Chroma(
-        embedding_function=get_embedding(),   
-        persist_directory=settings.chroma_persist_dir,
-        collection_name=settings.collection_name,
-    )

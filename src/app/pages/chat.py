@@ -19,7 +19,7 @@ def ingest(file_bytes: bytes, file_name: str):
     docs = load_documents(tmp_path)
     chunks = load_chunks(docs)
     vs = doc_embedd(chunks)
-    hybrid = build_hybrid_retriever(vs, chunks)
+    hybrid = build_hybrid_retriever(vs)
     retriever = HydeRetriever(base_retriever=hybrid)
     chain, compressed = build_qa_chain(retriever)
     st.session_state.chain = chain          # ← set inside cache

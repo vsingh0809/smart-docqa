@@ -20,7 +20,7 @@ def build_qa_chain(retriever:BaseRetriever):
         temperature=0
     )
 
-    compressor=doc_compressor(base_retriever=retriever,llm=llm)
+    compressor=doc_compressor(base_retriever=retriever)
 
     chain=(
         {

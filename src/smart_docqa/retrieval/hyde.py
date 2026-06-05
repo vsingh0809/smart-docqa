@@ -10,27 +10,24 @@ from smart_docqa.config import settings
 logger = logging.getLogger(__name__)
 
 HYDE_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", "You are a document writing assistant. Write a short factual passage (2-3 sentences) that would answer the following question if it appeared in a document."),
+    ("system", "Write a short factual passage (2-3 sentences) that answers the question."),
     ("human", "{question}"),
 ])
 
 class HydeRetriever(BaseRetriever):
     base_retriever: BaseRetriever
+    llm: ChatGoogleGenerativeAI = None # Define it at the class level
 
-    class Config:
-        arbitrary_types_allowed = True
-
-    def _get_relevant_documents(          # ✅ correct spelling
-        self,
-        query: str,
-        *,
-        run_manager: CallbackManagerForRetrieverRun,
-    ) -> list[Document]:
-        llm = ChatGoogleGenerativeAI(     # ✅ Gemini instead of OpenAI
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Initialize exactly once when the class is built
+        self.llm = ChatGoogleGenerativeAI(     
             model=settings.llm_model,
             temperature=0,
             google_api_key=settings.google_api_key,
         )
-        hyde_chain = HYDE_PROMPT | llm | StrOutputParser()   # ✅ added ()
+
+    def _get_relevant_documents(self, query: str, *, run_manager: CallbackManagerForRetrieverRun) -> list[Document]:
+        hyde_chain = HYDE_PROMPT | self.llm | StrOutputParser()
         hypothetical_doc = hyde_chain.invoke({"question": query})
-        return self.base_retriever.get_relevant_documents(hypothetical_doc)
+        return self.base_retriever.invoke(hypothetical_doc)

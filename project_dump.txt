@@ -1,0 +1,729 @@
+----- FILE: C:\Ai_Project\smart_docqa\src\app\pages\chat.py -----
+import streamlit as st
+from pathlib import Path
+import tempfile
+from smart_docqa.ingestion.loader import load_documents
+from smart_docqa.ingestion.chunker import load_chunks
+from smart_docqa.ingestion.embedder import doc_embedd
+from smart_docqa.retrieval.hybrid import build_hybrid_retriever
+from smart_docqa.retrieval.hyde import HydeRetriever
+from smart_docqa.chain.qa_chain import build_qa_chain
+
+st.set_page_config(page_title="Document Q&A", layout="wide")
+st.title("Document Q&A")
+
+@st.cache_resource(show_spinner="Ingesting document...")
+def ingest(file_bytes: bytes, file_name: str):
+    with tempfile.NamedTemporaryFile(suffix=Path(file_name).suffix, delete=False) as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+    docs = load_documents(tmp_path)
+    chunks = load_chunks(docs)
+    vs = doc_embedd(chunks)
+    hybrid = build_hybrid_retriever(vs, chunks)
+    retriever = HydeRetriever(base_retriever=hybrid)
+    chain, compressed = build_qa_chain(retriever)
+    st.session_state.chain = chain          # ← set inside cache
+    st.session_state.retriever = compressed
+    return chain, compressed, len(chunks)
+
+uploaded = st.file_uploader("Upload a document", type=["pdf", "txt", "docx"])
+
+if uploaded:
+    chain, retriever, n_chunks = ingest(uploaded.read(), uploaded.name)
+    st.session_state.chain = chain          # ← set outside cache too
+    st.session_state.retriever = retriever
+    st.caption(f"{n_chunks} chunks indexed")
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
+
+    if question := st.chat_input("Ask a question about your document"):
+        st.session_state.messages.append({"role": "user", "content": question})
+        with st.chat_message("user"):
+            st.write(question)
+
+        with st.chat_message("assistant"):
+            response = st.write_stream(chain.stream(question))
+
+        st.session_state.messages.append({"role": "assistant", "content": response})
+
+----- FILE: C:\Ai_Project\smart_docqa\src\app\pages\evaluation.py -----
+import streamlit as st
+import json
+from smart_docqa.evaluation.dataset import EvalSample, save_eval_results, load_eval_results
+
+st.set_page_config(page_title="Evaluation Dashboard", layout="wide")
+st.title("RAGAS evaluation dashboard")
+
+METRIC_DESCRIPTIONS = {
+    "faithfulness": "Is the answer grounded in the retrieved context?",
+    "answer_relevancy": "Does the answer address the question?",
+    "context_precision": "Are the retrieved chunks actually relevant?",
+    "context_recall": "Did we retrieve all chunks needed to answer?",
+}
+
+past = load_eval_results()
+if past:
+    latest = past[-1]
+    cols = st.columns(4)
+    for col, (metric, desc) in zip(cols, METRIC_DESCRIPTIONS.items()):
+        score = latest.get(metric, 0)
+        color = "green" if score >= 0.8 else "orange" if score >= 0.6 else "red"
+        col.metric(label=metric.replace("_", " ").title(), value=f"{score:.3f}")
+
+st.divider()
+st.subheader("Run a new evaluation")
+
+n = st.number_input("Number of test questions", min_value=1, max_value=20, value=3)
+samples_input = []
+for i in range(n):
+    with st.expander(f"Sample {i+1}"):
+        q = st.text_input("Question", key=f"q{i}")
+        gt = st.text_area("Ground truth answer", key=f"gt{i}")
+        if q and gt:
+            samples_input.append(EvalSample(question=q, ground_truth=gt))
+
+if st.button("Run RAGAS evaluation", disabled=len(samples_input) == 0):
+    if "chain" not in st.session_state or "retriever" not in st.session_state:
+        st.error("Upload and ingest a document on the Chat page first.")
+    else:
+        from smart_docqa.evaluation.runner import run_ragas
+        with st.spinner("Evaluating..."):
+            scores = run_ragas(
+                st.session_state.chain,
+                st.session_state.retriever,
+                samples_input,
+            )
+        scores["timestamp"] = str(__import__("datetime").datetime.now())
+        past.append(scores)
+        save_eval_results(past)
+        st.success("Done!")
+        st.json(scores)
+
+----- FILE: C:\Ai_Project\smart_docqa\src\app\main.py -----
+"""
+app/main.py
+-----------
+Streamlit application entry point.
+
+Run with:
+    streamlit run app/main.py
+
+This file does three things only:
+  1. Configures logging before anything else imports.
+  2. Sets global Streamlit page config (must be the very first st.* call).
+  3. Renders the home / landing page with navigation hints.
+
+The actual features live in app/pages/:
+  - 1_chat.py       →  document upload + streaming Q&A
+  - 2_evaluation.py →  RAGAS evaluation dashboard
+"""
+import os
+os.environ.setdefault("USER_AGENT", "SmartDocQA/1.0")
+import streamlit as st
+
+#from smart_docqa.utils.logger import setup_logging
+
+# ── Logging — must happen before any other import that uses logging ───────────
+#setup_logging()
+
+# ── Page config — must be the FIRST Streamlit call in the entire process ──────
+st.set_page_config(
+    page_title="Smart Document Q&A",
+    page_icon="📄",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# ── Home page content ─────────────────────────────────────────────────────────
+st.title("📄 Smart Document Q&A")
+st.caption("Production-quality RAG · Hybrid Search · HyDE · RAGAS Evaluation")
+
+st.markdown("---")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("💬 Chat with your document")
+    st.markdown(
+        """
+        - Upload a **PDF, TXT, or DOCX** file
+        - Ask questions in natural language
+        - Answers stream token-by-token with **source citations**
+        - Powered by **hybrid search** (dense + BM25) and **HyDE** query expansion
+        """
+    )
+    if st.button("Open Chat →", use_container_width=True):
+        st.switch_page("pages/chat.py")
+
+with col2:
+    st.subheader("📊 Evaluation Dashboard")
+    st.markdown(
+        """
+        - Run **RAGAS evaluation** on your uploaded document
+        - Measure **faithfulness**, **answer relevancy**,
+          **context precision**, and **context recall**
+        - Compare scores across runs with history tracking
+        - Identify exactly where your RAG pipeline is failing
+        """
+    )
+    if st.button("Open Evaluation →", use_container_width=True):
+        st.switch_page("pages/evaluation.py")
+
+st.markdown("---")
+
+with st.expander("⚙️  How it works", expanded=False):
+    st.markdown(
+        """
+        **Ingestion pipeline**
+        1. Document loaded (PDF / TXT / DOCX / URL)
+        2. `RecursiveCharacterTextSplitter` splits into 512-char chunks with 64-char overlap
+        3. Chunks embedded with `text-embedding-3-small` and stored in **ChromaDB**
+        4. A **BM25** sparse index is built in memory over the same chunks
+
+        **Query pipeline**
+        1. User query expanded via **HyDE** (LLM generates a hypothetical answer, embeds it)
+        2. **Hybrid retriever** fuses dense ChromaDB results + BM25 results via RRF
+        3. **Contextual compression** (LLMChainExtractor) strips irrelevant sentences
+        4. GPT-4o-mini generates a grounded answer with source citations
+
+        **Evaluation**
+        - [RAGAS](https://docs.ragas.io) scores every answer against ground truth
+        - Results persisted to `eval_results.json` for history comparison
+        """
+    )
+
+with st.expander("🛠️  Tech stack", expanded=False):
+    st.markdown(
+        """
+        | Component | Technology |
+        |---|---|
+        | LLM | GPT-4o-mini |
+        | Embeddings | text-embedding-3-small |
+        | Vector DB | ChromaDB (local) |
+        | Sparse retrieval | rank-bm25 |
+        | Framework | LangChain LCEL |
+        | Evaluation | RAGAS |
+        | Frontend | Streamlit |
+        | Config | pydantic-settings |
+        """
+    )
+
+st.sidebar.success("Select a page above to get started.")
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\chain\prompts.py -----
+from langchain_core.prompts import ChatPromptTemplate
+
+QA_SYSTEM_PROMPT = """You are a precise document Q&A assistant.
+Answer ONLY from the context provided. If the answer is not in the context, say:
+"I could not find this information in the uploaded document."
+
+Always cite the source at the end of your answer using the format:
+[Source: {{source}}]
+
+Context:
+{context}"""
+
+QA_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", QA_SYSTEM_PROMPT),
+    ("human", "{question}"),
+])
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\chain\qa_chain.py -----
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
+from langchain_google_genai import ChatGoogleGenerativeAI
+from smart_docqa.config import settings
+from smart_docqa.retrieval.compressor import doc_compressor
+from langchain_core.runnables import RunnableLambda,RunnablePassthrough
+from smart_docqa.chain.prompts import QA_PROMPT
+from langchain_core.output_parsers import StrOutputParser
+
+def format_docs(docs:Document)->str:
+    return "\n\n---\n\n".join(
+        f"[source:{doc.metadata.get('source','unknown')}]\n {doc.page_content}"
+        for doc in docs
+    )
+
+def build_qa_chain(retriever:BaseRetriever):
+    llm=ChatGoogleGenerativeAI(
+        model=settings.llm_model,
+        google_api_key=settings.google_api_key,
+        temperature=0
+    )
+
+    compressor=doc_compressor(base_retriever=retriever,llm=llm)
+
+    chain=(
+        {
+            "context":compressor|RunnableLambda(format_docs),
+            "question":RunnablePassthrough()
+        }
+        |QA_PROMPT
+        |llm
+        |StrOutputParser()
+    )
+
+    return chain,compressor
+
+
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\evaluation\dataset.py -----
+from dataclasses import dataclass,field
+from pathlib import Path
+import json
+
+@dataclass
+class EvalSample:
+    question: str
+    ground_truth: str
+    answer: str = ""
+    contexts: list[str] = field(default_factory=list)
+
+def save_eval_results(results: list[dict], path: str = "eval_results.json") -> None:
+    Path(path).write_text(json.dumps(results, indent=2, ensure_ascii=False))
+
+def load_eval_results(path: str = "eval_results.json") -> list[dict]:
+    p = Path(path)
+    if not p.exists():
+        return []
+    return json.loads(p.read_text())
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\evaluation\runner.py -----
+import logging
+from ragas import evaluate
+from ragas.metrics import Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall
+from ragas.llms import LangchainLLMWrapper
+from ragas.embeddings import LangchainEmbeddingsWrapper
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_huggingface import HuggingFaceEmbeddings
+from datasets import Dataset
+from smart_docqa.evaluation.dataset import EvalSample
+from smart_docqa.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def run_ragas(chain, retriever, samples: list[EvalSample]) -> dict:
+    if not samples:
+        raise ValueError("Provide at least one evaluation sample.")
+
+    rows = {"question": [], "answer": [], "contexts": [], "ground_truth": []}
+
+    for sample in samples:
+        try:
+            answer = chain.invoke(sample.question)
+            docs = retriever.get_relevant_documents(sample.question)
+            contexts = [doc.page_content for doc in docs]
+            rows["question"].append(sample.question)
+            rows["answer"].append(answer)
+            rows["contexts"].append(contexts)
+            rows["ground_truth"].append(sample.ground_truth)
+        except Exception:
+            logger.exception("Failed to process sample: %s", sample.question)
+
+    dataset = Dataset.from_dict(rows)
+
+    llm = LangchainLLMWrapper(ChatGoogleGenerativeAI(
+        model=settings.llm_model,
+        google_api_key=settings.google_api_key,
+        temperature=0,
+    ))
+
+    embeddings = LangchainEmbeddingsWrapper(HuggingFaceEmbeddings(
+        model=settings.embedding_model,
+        google_api_key=settings.google_api_key,
+    ))
+
+    metrics = [
+        Faithfulness(llm=llm),
+        AnswerRelevancy(llm=llm, embeddings=embeddings),
+        ContextPrecision(llm=llm),
+        ContextRecall(llm=llm),
+    ]
+
+    results = evaluate(dataset, metrics=metrics)
+    result=results.to_pandas()
+
+    scores = {
+        "faithfulness": round(float(result["faithfulness"].mean()), 3),
+        "answer_relevancy": round(float(result["answer_relevancy"].mean()), 3),
+        "context_precision": round(float(result["context_precision"].mean()), 3),
+        "context_recall": round(float(result["context_recall"].mean()), 3),
+    }
+
+    logger.info("RAGAS scores: %s", scores)
+    return scores
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\ingestion\chunker.py -----
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from smart_docqa.config import settings
+
+def load_chunks(docs:list[Document])->list[Document]:
+
+    if not docs:
+        raise FileExistsError("there is no such docs")
+    
+    doc_splitter=RecursiveCharacterTextSplitter(
+        chunk_size=settings.chunk_size,
+        chunk_overlap=settings.chunk_overlap,
+        separators=["\n\n","\n"," ","","."],
+        add_start_index=True
+    )
+
+    chunks=doc_splitter.split_documents(docs)
+
+    for i,chunk in enumerate(chunks):
+        chunk.metadata["chunk_index"]=i
+        chunk.metadata["chunk_count"]=len(chunks)
+
+    return chunks
+
+
+
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\ingestion\embedder.py -----
+import logging
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_chroma import Chroma
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from langchain_core.documents import Document
+from pydantic import SecretStr
+from smart_docqa.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def get_embedding() -> FastEmbedEmbeddings:
+    return FastEmbedEmbeddings(
+        model=settings.embedding_model,
+    )
+
+def doc_embedd(chunks: list[Document]) -> Chroma:
+    if not chunks:
+        raise ValueError("Cannot build vectorstore from empty chunk list.")
+
+    logger.info(
+        "Embedding %d chunks into collection '%s'",
+        len(chunks),
+        settings.collection_name,
+    )
+
+    vector_store = Chroma.from_documents(
+        documents=chunks,
+        embedding=get_embedding(),
+        collection_name=settings.collection_name,
+        persist_directory=settings.chroma_persist_dir,
+    )
+
+    logger.info("Vectorstore built and persisted to %s", settings.chroma_persist_dir)
+    return vector_store
+
+
+def load_chroma() -> Chroma:
+    return Chroma(
+        embedding_function=get_embedding(),   
+        persist_directory=settings.chroma_persist_dir,
+        collection_name=settings.collection_name,
+    )
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\ingestion\init.py -----
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\ingestion\loader.py -----
+import logging
+from pathlib import Path
+from typing import Union
+from langchain_core.documents import Document
+from langchain_community.document_loaders import (
+    PyPDFLoader,
+    TextLoader,
+    Docx2txtLoader,
+    WebBaseLoader
+)
+
+logger=logging.getLogger(__name__)
+
+LOADERS={
+     ".pdf": PyPDFLoader,
+    ".txt": TextLoader,
+    ".docx": Docx2txtLoader,
+}
+
+def load_documents(source:Union[str,Path])->list[Document]:
+    """Load a document from a file path or URL."""
+    source= str(source)
+
+    if source.startswith("http://") or source.startswith("https://"):
+        logger.info("Loading URL: %s", source)
+        loader = WebBaseLoader(source)
+        return loader.load()
+    
+    path=Path(source)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+    
+    suffix= path.suffix.lower()
+    loader_cls=LOADERS.get(suffix)
+    if loader_cls is None:
+        raise ValueError(f"Unsupported file type: {suffix}. Supported: {list(LOADERS)}")
+    
+    logger.info("Loading %s file: %s", suffix, path)
+    loader= loader_cls(str(path))
+    docs= loader.load()
+
+    for doc in docs:
+        doc.metadata["source"]=str(path)
+        doc.metadata["file_type"]=suffix
+
+    return docs    
+
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\retrieval\compressor.py -----
+import logging
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.retrievers import BaseRetriever
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import LLMChainExtractor
+from smart_docqa.config import settings
+
+
+logger=logging.getLogger(__name__)
+
+def doc_compressor(base_retriever:BaseRetriever,llm:ChatGoogleGenerativeAI)->ContextualCompressionRetriever:
+    
+    compressor=LLMChainExtractor.from_llm(llm)
+
+    compressed_Retriever=ContextualCompressionRetriever(
+        base_compressor=compressor,
+        base_retriever=base_retriever
+    ) 
+
+    logger.debug(
+        "ContextualCompressionRetriever built with model=%s on top of %s",
+        settings.llm_model,
+        type(base_retriever).__name__,
+    )
+
+    return compressed_Retriever
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\retrieval\hybrid.py -----
+import logging
+from langchain_chroma import Chroma
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.documents import Document
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
+from rank_bm25 import BM25Okapi
+from smart_docqa.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class HybridRetriever(BaseRetriever):
+    vector_database: Chroma
+    bm25: BM25Okapi
+    corpus: list[Document]
+    k: int = settings.retriever_k
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def _get_relevant_documents(
+        self,
+        query: str,
+        *,
+        run_manager: CallbackManagerForRetrieverRun,
+    ) -> list[Document]:
+        dense_docs = self.vector_database.similarity_search(
+            query=query,
+            k=self.k * 2,
+        )
+        tokenized_query = query.lower().split()
+        bm25_scores = self.bm25.get_scores(tokenized_query)
+        bm25_indices = sorted(
+            range(len(bm25_scores)),
+            key=lambda i: bm25_scores[i],
+            reverse=True,
+        )[: self.k * 2]
+        bm25_docs = [self.corpus[i] for i in bm25_indices]
+        return self._reciprocal_rank_fusion(dense_docs, bm25_docs)
+
+    def _reciprocal_rank_fusion(
+        self,
+        dense: list[Document],
+        sparse: list[Document],
+        k: int = 60,
+    ) -> list[Document]:
+        scores: dict[str, float] = {}
+        doc_map: dict[str, Document] = {}
+
+        for rank, doc in enumerate(dense):
+            key = doc.page_content
+            scores[key] = scores.get(key, 0) + 1 / (rank + k)  
+            doc_map[key] = doc
+
+        for rank, doc in enumerate(sparse):
+            key = doc.page_content
+            scores[key] = scores.get(key, 0) + 1 / (rank + k)  
+            doc_map[key] = doc
+
+        fusion = sorted(scores, key=lambda x: scores[x], reverse=True)[: self.k]
+        return [doc_map[key] for key in fusion]  # ✅ use fusion not scores
+
+
+def build_hybrid_retriever(vector: Chroma, corpus: list[Document]) -> HybridRetriever:
+    tokenized_corpus = [doc.page_content.lower().split() for doc in corpus]
+    bm25 = BM25Okapi(tokenized_corpus)
+    return HybridRetriever(vector_database=vector, bm25=bm25, corpus=corpus)
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\retrieval\hyde.py -----
+import logging
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.documents import Document
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
+from langchain_google_genai import ChatGoogleGenerativeAI
+from smart_docqa.config import settings
+
+logger = logging.getLogger(__name__)
+
+HYDE_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", "You are a document writing assistant. Write a short factual passage (2-3 sentences) that would answer the following question if it appeared in a document."),
+    ("human", "{question}"),
+])
+
+class HydeRetriever(BaseRetriever):
+    base_retriever: BaseRetriever
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    def _get_relevant_documents(          
+        self,
+        query: str,
+        *,
+        run_manager: CallbackManagerForRetrieverRun,
+    ) -> list[Document]:
+        llm = ChatGoogleGenerativeAI(     
+            model=settings.llm_model,
+            temperature=0,
+            google_api_key=settings.google_api_key,
+        )
+        hyde_chain = HYDE_PROMPT | llm | StrOutputParser()   # ✅ added ()
+        hypothetical_doc = hyde_chain.invoke({"question": query})
+        return self.base_retriever.get_relevant_documents(hypothetical_doc)
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\config.py -----
+from pydantic_settings import BaseSettings,SettingsConfigDict
+from pathlib import Path
+
+ENV_FILE = Path(__file__).parent.parent.parent / ".env"
+
+class Settings(BaseSettings):
+    model_config=SettingsConfigDict(env_file=str(ENV_FILE),extra="ignore")
+
+    open_api_key:str | None = None
+    google_api_key:str | None = None
+    user_agent: str = "smart-docqa/0.1.0"
+    chroma_persist_dir:str="./chroma_db"
+    collection_name:str="documents"
+    chunk_size:int=512
+    chunk_overlap:int=64
+    retriever_k:int=6
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    llm_model: str = "gemini-3.1-flash-lite"
+
+settings = Settings()
+
+----- FILE: C:\Ai_Project\smart_docqa\src\smart_docqa\init.py -----
+
+----- FILE: C:\Ai_Project\smart_docqa\pyproject.toml -----
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "smart-docqa"
+version = "0.1.0"
+description = "Production-quality RAG system with hybrid search, HyDE, and RAGAS evaluation dashboard"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    # ── LLM & LangChain ──────────────────────────────────────────────────────
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-community>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-chroma>=0.1.4",
+    "langchain-text-splitters>=0.3.0",
+
+    # ── Vector DB ─────────────────────────────────────────────────────────────
+    "chromadb>=0.5.0",
+
+    # ── Sparse retrieval ──────────────────────────────────────────────────────
+    "rank-bm25>=0.2.2",
+
+    # ── Document loaders ──────────────────────────────────────────────────────
+    "pypdf>=4.0.0",
+    "docx2txt>=0.8",
+    "beautifulsoup4>=4.12.0",
+
+    # ── Evaluation ────────────────────────────────────────────────────────────
+    "ragas>=0.1.21",
+    "datasets>=2.20.0",
+
+    # ── Frontend ──────────────────────────────────────────────────────────────
+    "streamlit>=1.37.0",
+
+    # ── Config & validation ───────────────────────────────────────────────────
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "python-dotenv>=1.0.0",
+
+    # ── HTTP ──────────────────────────────────────────────────────────────────
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.5.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/smart_docqa"]
+
+# ── Ruff (linter + formatter) ─────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+# ── Pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"
+
+# ── Coverage ──────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["src/smart_docqa"]
+omit = ["*/tests/*", "*/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+
