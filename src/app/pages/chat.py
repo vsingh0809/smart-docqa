@@ -18,6 +18,8 @@ def ingest(file_bytes: bytes, file_name: str):
         tmp_path = tmp.name
     docs = load_documents(tmp_path)
     chunks = load_chunks(docs)
+    if len(chunks) > 500:
+       st.warning(f"Document has {len(chunks)} chunks — this may take 2-3 minutes.")      
     vs = doc_embedd(chunks)
     hybrid = build_hybrid_retriever(vs)
     retriever = HydeRetriever(base_retriever=hybrid)

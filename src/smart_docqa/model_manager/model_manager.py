@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 def get_dense_embedding_model():
     """Lazily loads the FastEmbed model into RAM once to prevent Azure OOM crashes."""
     logger.info("Initializing Dense Model into RAM...")
-    return FastEmbedEmbeddings(model_name=settings.dense_embedding_model)
+    return FastEmbedEmbeddings(model_name=settings.dense_embedding_model,
+                               timeout=60, )
 
 @st.cache_resource
 def get_sparse_embedding_model():

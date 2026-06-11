@@ -20,6 +20,8 @@ def doc_embedd(chunks: list[Document]) -> QdrantVectorStore:
         url=settings.qdrant_url,
         api_key=settings.qdrant_api_key,
         collection_name=settings.collection_name,
-        force_recreate=True 
+        force_recreate=True ,
+        batch_size=50,  
+        timeout=60, 
     )
     return vector_store
