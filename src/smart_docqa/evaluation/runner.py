@@ -3,7 +3,8 @@ from ragas import evaluate
 from ragas.metrics import Faithfulness, AnswerRelevancy, ContextPrecision, ContextRecall
 from ragas.llms import LangchainLLMWrapper
 from ragas.embeddings import LangchainEmbeddingsWrapper
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from datasets import Dataset
 from smart_docqa.evaluation.dataset import EvalSample
 from smart_docqa.config import settings
@@ -37,7 +38,7 @@ def run_ragas(chain, retriever, samples: list[EvalSample]) -> dict:
         temperature=0,
     ))
 
-    embeddings = LangchainEmbeddingsWrapper(GoogleGenerativeAIEmbeddings(
+    embeddings = LangchainEmbeddingsWrapper(FastEmbedEmbeddings(
         model=settings.embedding_model,
         google_api_key=settings.google_api_key,
     ))

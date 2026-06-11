@@ -14,7 +14,12 @@ class Settings(BaseSettings):
     chunk_size:int=512
     chunk_overlap:int=64
     retriever_k:int=6
-    embedding_model: str = "models/gemini-embedding-2-preview"
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: str | None = None
+    collection_name: str = "SmartQA"
+
+    dense_embedding_model: str = "BAAI/bge-small-en-v1.5"
+    sparse_embedding_model: str = "prithivida/Splade_PP_en_v1"
     llm_model: str = "gemini-3.1-flash-lite"
 
 settings = Settings()

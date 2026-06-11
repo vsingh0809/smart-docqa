@@ -1,26 +1,17 @@
 import logging
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.retrievers import BaseRetriever
-from langchain.retrievers import ContextualCompressionRetriever
-from langchain.retrievers.document_compressors import LLMChainExtractor
-from smart_docqa.config import settings
+from langchain_classic.retrievers import ContextualCompressionRetriever
+from langchain_classic.retrievers.document_compressors import CrossEncoderReranker
+from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 
+logger = logging.getLogger(__name__)
 
-logger=logging.getLogger(__name__)
+def doc_compressor(base_retriever: BaseRetriever) -> ContextualCompressionRetriever:
+    # Uses a tiny 90MB local model to filter bad chunks instantly
+    model = HuggingFaceCrossEncoder(model_name="cross-encoder/ms-marco-MiniLM-L-6-v2")
+    compressor = CrossEncoderReranker(model=model, top_n=3)
 
-def doc_compressor(base_retriever:BaseRetriever,llm:ChatGoogleGenerativeAI)->ContextualCompressionRetriever:
-    
-    compressor=LLMChainExtractor.from_llm(llm)
-
-    compressed_Retriever=ContextualCompressionRetriever(
+    return ContextualCompressionRetriever(
         base_compressor=compressor,
         base_retriever=base_retriever
-    ) 
-
-    logger.debug(
-        "ContextualCompressionRetriever built with model=%s on top of %s",
-        settings.llm_model,
-        type(base_retriever).__name__,
     )
-
-    return compressed_Retriever
